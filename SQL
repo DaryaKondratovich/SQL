@@ -1,0 +1,67 @@
+/*Запрос, который удалит из поля phone лишние символы: скобки и пробелы*/
+SELECT REPLACE(REPLACE(REPLACE(phone, '(', ''), ')', ''), ' ', '') as phone 
+FROM user_contacts;
+
+/*Запрос, который оставит в поле phone только цифры:*/
+SELECT REGEXP_REPLACE(phone, '[^[:digit:]]', '', 'g') AS phone 
+FROM user_contacts;
+
+/*Запрос, который обновит поле phone (оставив в нем только цифры) и выведет код региона клиента в поле reg_code - 
+это трёхзначный код номера телефона после первой цифры 8:*/
+UPDATE user_contacts SET phone = regexp_replace(phone, '[^[:digit:]]', '', 'g'); 
+SELECT SUBSTRING(phone, 2, 3) AS reg_code FROM user_contacts;
+
+/*Запрос, который округлит даты в текстовом поле updated_at до первого дня месяца. Сначала преобразует поле к типу timestamp, 
+а затем округлит значения до первого дня месяца и выведи только дату без времени.*/
+SELECT DATE_TRUNC('month', TO_TIMESTAMP(updated_at, 'HH24:MI:SS DD/MM/YYYY'))::DATE AS updated_month
+FROM user_contacts;
+
+/*Запрос добавит FK-ограничение с названием user_contacts_client_id_fkey, 
+которое ограничит поле client_id в таблице user_contacts только значениями client_id из таблицы user_attributes*/
+ALTER TABLE user_contacts ADD CONSTRAINT user_contacts_client_id_fkey FOREIGN KEY client_id REFERENCES user_attributes (client_id);
+
+/*Запрос добавит NOT NULL ограничение на колонку client_id в таблице user_contacts.*/
+ALTER TABLE user_contacts ALTER client_id SET NOT NULL;
+
+/* запрос над таблицей user_activity_log, который вернёт три поля: 
+	• client_id — идентификатор клиента;
+	• month — месяц данных (должен иметь тип date);
+	• visit_to_login_events — количество событий типа login, следующих сразу, без каких-либо промежуточных событий, после события visit за месяц.*/
+
+SELECT client_id, DATE_TRUNC('month', hitdatetime)::DATE AS month, 
+COUNT(CASE WHEN prev_action = 'visit' AND action = 'login' THEN 1 ELSE NULL END) AS visit_to_login_events 
+FROM(SELECT *, LAG(action) OVER(PARTITION BY client_id ORDER BY hitdatetime)
+AS prev_action FROM user_activity_log) AS ual
+GROUP BY client_id, month;
+
+/* запрос над таблицей user_payment_log, который вернёт 2 поля:
+	1. client_id — идентификатор клиента;
+	2. daily_actions_pct — процент действий клиента, совершённых в промежутке с 12 до 18 часов 
+    (не включая правую границу 18:00), от всех действий клиента в таблице.
+Считаем, что все клиенты находятся в одном часовом поясе и данные в базе соответствуют этому поясу. */
+
+SELECT client_id, 
+  COUNT(*) FILTER (WHERE EXTRACT(HOUR FROM hitdatetime) >= 12 AND EXTRACT(HOUR FROM hitdatetime) < 18) * 100.0 / COUNT(*) AS daily_actions_pct
+FROM  user_payment_log GROUP BY client_id;
+
+/*Проверьте корректность значений метрики visit_events — количество событий типа visit по каждому клиенту в месяц из таблицы user_activity_log.
+	• visit_events_min — минимальное значение метрики;
+	• visit_events_max — максимальное значение метрики;
+	• visit_events_avg — среднее значение метрики;
+	• visit_events_null — количество пустых значений метрики;
+	• visit_events_zero — количество нулевых значений метрики;
+	• visit_events_zero_pct — процент нулевых значений метрики по всей таблице;
+visit_events_nonzero — количество ненулевых значений метрики.*/
+
+WITH cte AS (SELECT client_id, CAST(DATE_TRUNC('Month',hitdatetime) AS DATE) "month",
+    COUNT(CASE WHEN "action" = 'visit' THEN 1 END) visit_events
+FROM user_activity_log
+WHERE EXTRACT(YEAR FROM hitdatetime) = 2021
+GROUP BY client_id, CAST(DATE_TRUNC('Month',hitdatetime) AS DATE))
+
+SELECT MIN(visit_events) AS visit_events_min, MAX(visit_events) AS visit_events_max, 
+AVG(visit_events) AS visit_events_avg, COUNT(*) FILTER(WHERE visit_events IS NULL) AS visit_events_null, 
+COUNT(*) FILTER(WHERE visit_events = 0) AS visit_events_zero, 
+COUNTt(*) FILTER(WHERE visit_events = 0) * 100.0 / COUNT(*) AS visit_events_zero_pct,
+COUNT(*) - COUNT(*) FILTER(WHERE visit_events = 0) AS visit_events_nonzero
+FROM cte;
