@@ -1,33 +1,23 @@
-/*Запрос, который удалит из поля phone лишние символы: скобки и пробелы*/
-
-SELECT REPLACE(REPLACE(REPLACE(phone, '(', ''), ')', ''), ' ', '') as phone 
-FROM user_contacts;
-
-/*Запрос, который оставит в поле phone только цифры:*/
+/* Запрос, который оставит в поле phone только цифры: */
 
 SELECT REGEXP_REPLACE(phone, '[^[:digit:]]', '', 'g') AS phone 
 FROM user_contacts;
 
-/*Запрос, который обновит поле phone (оставив в нем только цифры) и выведет код региона клиента в поле reg_code - 
-это трёхзначный код номера телефона после первой цифры 8:*/
-
-UPDATE user_contacts SET phone = regexp_replace(phone, '[^[:digit:]]', '', 'g'); 
-SELECT SUBSTRING(phone, 2, 3) AS reg_code FROM user_contacts;
-
-/*Запрос, который округлит даты в текстовом поле updated_at до первого дня месяца. Сначала преобразует поле к типу timestamp, 
-а затем округлит значения до первого дня месяца и выведи только дату без времени.*/
+/* Запрос, который округлит даты в текстовом поле updated_at до первого дня месяца. Сначала преобразует поле к типу timestamp, 
+а затем округлит значения до первого дня месяца и выведи только дату без времени. */
 
 SELECT DATE_TRUNC('month', TO_TIMESTAMP(updated_at, 'HH24:MI:SS DD/MM/YYYY'))::DATE AS updated_month
 FROM user_contacts;
 
-/*Запрос добавит NOT NULL ограничение на колонку client_id в таблице user_contacts.*/
+/* Запрос добавит NOT NULL ограничение на колонку client_id в таблице user_contacts. */
 
 ALTER TABLE user_contacts ALTER client_id SET NOT NULL;
 
 /* запрос над таблицей user_activity_log, который вернёт три поля: 
 	• client_id — идентификатор клиента;
 	• month — месяц данных (должен иметь тип date);
-	• visit_to_login_events — количество событий типа login, следующих сразу, без каких-либо промежуточных событий, после события visit за месяц.*/
+	• visit_to_login_events — количество событий типа login, следующих сразу,
+	без каких-либо промежуточных событий, после события visit за месяц.*/
 
 SELECT client_id, DATE_TRUNC('month', hitdatetime)::DATE AS month, 
 COUNT(CASE WHEN prev_action = 'visit' AND action = 'login' THEN 1 ELSE NULL END) AS visit_to_login_events 
@@ -46,14 +36,15 @@ SELECT client_id,
   AND EXTRACT(HOUR FROM hitdatetime) < 18) * 100.0 / COUNT(*) AS daily_actions_pct
 FROM  user_payment_log GROUP BY client_id;
 
-/*Проверьте корректность значений метрики visit_events — количество событий типа visit по каждому клиенту в месяц из таблицы user_activity_log.
+/* Проверьте корректность значений метрики visit_events — количество событий
+ типа visit по каждому клиенту в месяц из таблицы user_activity_log.
 	• visit_events_min — минимальное значение метрики;
 	• visit_events_max — максимальное значение метрики;
 	• visit_events_avg — среднее значение метрики;
 	• visit_events_null — количество пустых значений метрики;
 	• visit_events_zero — количество нулевых значений метрики;
 	• visit_events_zero_pct — процент нулевых значений метрики по всей таблице;
-visit_events_nonzero — количество ненулевых значений метрики.*/
+visit_events_nonzero — количество ненулевых значений метрики. */
 
 WITH cte AS (SELECT client_id, CAST(DATE_TRUNC('Month',hitdatetime) AS DATE) "month",
     COUNT(CASE WHEN "action" = 'visit' THEN 1 END) visit_events
@@ -195,3 +186,25 @@ FULL JOIN pmnts p ON p."month" = a."month"
 JOIN user_attributes ua ON ua.client_id = COALESCE(a.client_id,p.client_id)
 LEFT JOIN cntct c ON c.client_id = ua.client_id
 ORDER BY 1,2;
+
+/* Проверьте глубину данных и наличие пробелов в них. Запрос к построенной витрине clients_cluster_metrics_m, 
+который вернёт два поля:
+	• month — месяц данных из витрины;
+	• total_records — общее количество записей в этом месяце.
+Отсортируем данные по убыванию значений поля month. */
+
+SELECT month, COUNT(*) AS total_records FROM clients_cluster_metrics_m GROUP BY month ORDER BY month DESC;
+
+/* Запрос, который вернёт два поля:
+	• month — месяц данных из витрины;
+	• rejects_share_empty_pct — процент случаев, когда поле rejects_share не заполнено. 
+Ожидаемый формат данных в поле — число с плавающей запятой и 16 символами после запятой.
+Отсортировать данные по убыванию значений поля month и не используйте CTE или подзапросы.*/
+
+SELECT month, COUNT(CASE WHEN rejects_share IS NULL THEN 1 END) * 100 / COUNT(*)::DECIMAL(38,16) AS rejects_share_empty_pct 
+FROM clients_cluster_metrics_m ccmm 
+GROUP BY month
+ORDER BY month DESC;
+
+
+
