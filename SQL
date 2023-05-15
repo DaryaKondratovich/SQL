@@ -206,5 +206,51 @@ FROM clients_cluster_metrics_m ccmm
 GROUP BY month
 ORDER BY month DESC;
 
+/* Запрос, который выберет максимальное значение из Date. */
+
+SELECT max(date) FROM load_dates;
+
+/* Запрос, который выберет из таблицы user_activity_log все данные с датой больше,
+ чем максимальное значение, полученное в предыдущем запросе */
+
+SELECT * FROM user_activity_log WHERE hitdatetime > (SELECT max(date) FROM load_dates);
+
+*/ Даны две таблицы — clients и clients_inc. Таблица clients_inc уже содержит очередной инкремент,
+ то есть те данные, которые ещё не были загружены в таблицу clients. 
+
+Запрос, который сравнит все строки из clients_inc со строками из clients. 
+Добавим в запрос поле action, которое будет принимать одно из значений — U или I:
+	• Если запись есть в clients_inc, но её нет в clients, то action принимает значение  I.
+	• Если запись есть в обеих таблицах, но данные в полях различаются, тогда action принимает значение U. */
+
+SELECT ci.*, c.*, CASE WHEN c.client_id  = ci.client_id THEN 'U' ELSE 'I' END AS action 
+FROM clients_inc ci LEFT JOIN clients c ON ci.client_id  = c.client_id;
+
+/* Запрос, который вносит изменения в таблицу clients, чтобы в ней тоже была актуальная информация. 
+Запрос должен выбирать все записи по условию action = 'I' и вставлять эти записи в таблицу clients. */
+
+INSERT INTO clients
+SELECT client_id, client_firstname, client_lastname, client_email, client_phone, client_city, age
+FROM (
+	SELECT ci.client_id, ci.client_firstname, ci.client_lastname, ci.client_email, ci.client_city, ci.client_phone, ci.age, 
+	CASE WHEN c.client_id  = ci.client_id THEN 'U' ELSE 'I' END AS action 
+FROM clients_inc ci LEFT JOIN clients c ON ci.client_id  = c.client_id) t WHERE t.action = 'I';
+
+*/ Запрос, который выберет все записи по условию action = 'U' и обновит эти записи в таблице clients. */
+
+UPDATE clients
+SET
+client_firstname = t1.client_firstname, 
+client_lastname = t1.client_lastname,
+client_email = t1.client_email,
+client_phone = t1.client_phone,
+client_city = t1.client_city,
+age = t1.age
+FROM (SELECT client_id, client_firstname, client_lastname, client_email, client_phone, client_city, age
+FROM (SELECT ci.*, CASE WHEN c.client_id = ci.client_id THEN 'U' ELSE 'I' END AS action
+FROM clients_inc ci LEFT JOIN clients c ON ci.client_id = c.client_id) t WHERE t.action = 'U') AS t1
+WHERE clients.client_id = t1.client_id;
+
+
 
 
